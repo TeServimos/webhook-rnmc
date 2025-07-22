@@ -1,8 +1,7 @@
-﻿from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify
 import subprocess
 import traceback
 import os
-import re
 
 app = Flask(__name__)
 
@@ -10,7 +9,6 @@ app = Flask(__name__)
 def ejecutar_rnmc():
     try:
         data = request.get_json(force=True)
-
         cedula = data.get("cedula")
         fecha_exp = data.get("fecha_expedicion")
         carpeta_destino_id = data.get("carpeta_destino_id")
@@ -26,25 +24,13 @@ def ejecutar_rnmc():
             carpeta_destino_id
         ]
 
-        print("Ejecutando comando:", " ".join(comando))
-        resultado = subprocess.run(comando, capture_output=True, text=True)
-
-        print("\n--- Salida estándar ---")
-        print(resultado.stdout)
-
-        print("\n--- Errores (si hay) ---")
-        print(resultado.stderr)
-
-        if resultado.returncode != 0:
-            raise RuntimeError("El script Python falló")
-
-        return jsonify({"estado": "ok", "mensaje": "Script ejecutado correctamente"}), 200
+        subprocess.Popen(comando)  # Ejecutar en segundo plano
+        return jsonify({"estado": "en_proceso", "mensaje": "Script lanzado en segundo plano"}), 202
 
     except Exception as e:
-        print("Error al ejecutar:", str(e))
         traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    print("Servidor webhook RNMC escuchando en http://127.0.0.1:5000/ejecutar_rnmc")
-    app.run(port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)

@@ -1,3 +1,5 @@
+print(">>> INICIO DE CONSULTA RNMC <<<")
+
 import sys
 import time
 import os

@@ -21,7 +21,7 @@ from weasyprint import HTML
 # ============================ #
 def subir_a_drive(nombre_archivo_local, nombre_final_en_drive, mime_type, carpeta_destino_id):
     SCOPES = ['https://www.googleapis.com/auth/drive']
-    SERVICE_ACCOUNT_FILE = 'service_account.json'
+    SERVICE_ACCOUNT_FILE = 'teservimos-ocr-1c78273f15f3.json'
 
     creds = service_account.Credentials.from_service_account_file(
         SERVICE_ACCOUNT_FILE, scopes=SCOPES)

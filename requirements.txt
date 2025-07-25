@@ -2,4 +2,7 @@ flask
 google-api-python-client
 google-auth
 selenium
+wkhtmltopdf
 gunicorn
+pydrive
+pdfkit

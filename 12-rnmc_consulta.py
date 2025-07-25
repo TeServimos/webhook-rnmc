@@ -78,4 +78,31 @@ try:
     print("Subiendo a Google Drive...")
     SCOPES = ['https://www.googleapis.com/auth/drive']
     SERVICE_ACCOUNT_FILE = 'teservimos-ocr-1c78273f15f3.json'
-    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE
+    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+    service = build('drive', 'v3', credentials=creds)
+
+    file_metadata = {
+        'name': ARCHIVO_PDF,
+        'parents': [FOLDER_ID]
+    }
+    media = MediaFileUpload(ARCHIVO_PDF, mimetype='application/pdf')
+    file = service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+
+    # Hacer público
+    file_id = file['id']
+    service.permissions().create(fileId=file_id, body={'role': 'reader', 'type': 'anyone'}).execute()
+    public_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
+
+    print(f"ENLACE_PUBLICO::{public_link}")
+    print(">>> CONSULTA COMPLETADA CON ÉXITO <<<")
+    driver.quit()
+    sys.exit(0)
+
+except Exception as e:
+    print("[ERROR] Excepción en el proceso:")
+    traceback.print_exc()
+    try:
+        driver.quit()
+    except:
+        pass
+    sys.exit(1)

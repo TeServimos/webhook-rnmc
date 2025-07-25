@@ -24,54 +24,64 @@ ARCHIVO_HTML = f"resultado_rnmc_{CEDULA}.html"
 
 print(">>> INICIO DE CONSULTA RNMC <<<")
 
-# === Automatización web ===
+# === Configurar navegador ===
 opts = Options()
 opts.add_argument("--headless=new")
-opts.add_argument('--no-sandbox')
-opts.add_argument('--disable-dev-shm-usage')
+opts.add_argument("--no-sandbox")
+opts.add_argument("--disable-dev-shm-usage")
 driver = webdriver.Chrome(options=opts)
 wait = WebDriverWait(driver, 20)
 
+# === Cargar la página
 print("Cargando página...")
 driver.get("https://srvcnpc.policia.gov.co/PSC/frm_cnp_consulta.aspx")
 print("Página cargada.")
 
-# Selección de tipo de documento
-Select(wait.until(EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_ddlTipoDoc")))).select_by_value("55")
+# === Seleccionar tipo de documento
+select_tipo_doc = wait.until(EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_ddlTipoDoc")))
+Select(select_tipo_doc).select_by_value("55")  # Cédula de Ciudadanía
+print("Tipo de documento seleccionado.")
 
-# Ingreso de cédula
+# Esperar a que el campo de cédula esté estable después del postback
+time.sleep(1)
+
+# === Ingresar número de cédula
 for intento in range(3):
     try:
-        campo_cedula = wait.until(EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_txtExpediente")))
+        campo_cedula = wait.until(EC.presence_of_element_located((By.ID, "ctl00_ContentPlaceHolder3_txtExpediente")))
         campo_cedula.clear()
         campo_cedula.send_keys(CEDULA)
+        print("Cédula ingresada.")
         break
     except StaleElementReferenceException:
         print("Reintentando campo cédula...")
         time.sleep(1)
 
-# Ingreso de fecha de expedición
+# === Ingresar fecha de expedición
 for intento in range(3):
     try:
         campo_fecha = wait.until(EC.element_to_be_clickable((By.ID, "txtFechaexp")))
         campo_fecha.clear()
         campo_fecha.send_keys(FECHA_EXP)
+        print("Fecha de expedición ingresada.")
         break
     except StaleElementReferenceException:
         print("Reintentando campo fecha...")
         time.sleep(1)
 
-# Click en consultar
+# === Hacer clic en consultar
 wait.until(EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_btnConsultar2"))).click()
+print("Consulta enviada. Esperando resultado...")
 time.sleep(6)
 
-# Guardar contenido HTML
+# === Guardar HTML
 html_content = driver.page_source
 html_content = html_content.replace("<head>", "<head><meta charset='UTF-8'>")
 with open(ARCHIVO_HTML, "w", encoding="utf-8") as f:
     f.write(html_content)
+print("HTML guardado.")
 
-# Generar PDF
+# === Generar PDF
 try:
     pdfkit.from_file(ARCHIVO_HTML, ARCHIVO_PDF, options={
         'enable-local-file-access': '',
@@ -79,15 +89,17 @@ try:
         'load-media-error-handling': 'ignore',
         'encoding': 'utf-8'
     })
+    print("PDF generado con éxito.")
 except Exception as e:
     print("Error al generar PDF:", e)
+    driver.quit()
     sys.exit(1)
 
-# === Subida a Google Drive ===
+# === Subir a Google Drive
 print("Subiendo a Google Drive...")
-
 SCOPES = ['https://www.googleapis.com/auth/drive']
 SERVICE_ACCOUNT_FILE = 'credentials.json'
+
 creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 service = build('drive', 'v3', credentials=creds)
 
@@ -105,3 +117,4 @@ public_link = f"https://drive.google.com/file/d/{file_id}/view?usp=sharing"
 
 print(f"ENLACE_PUBLICO::{public_link}")
 print(">>> FIN DEL PROCESO RNMC <<<")
+driver.quit()

@@ -1,9 +1,7 @@
-print(">>> INICIO DE CONSULTA RNMC <<<")
-
 import sys
 import time
 import os
-import base64
+import json
 import traceback
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -19,8 +17,7 @@ def iniciar_driver():
     chrome_options.add_argument('--headless')
     chrome_options.add_argument('--no-sandbox')
     chrome_options.add_argument('--disable-dev-shm-usage')
-    driver = webdriver.Chrome(options=chrome_options)
-    return driver
+    return webdriver.Chrome(options=chrome_options)
 
 def consultar_rnmc(cedula, fecha_expedicion):
     url = "https://antecedentes.policia.gov.co:7005/WebJudicial/index.xhtml"
@@ -32,55 +29,51 @@ def consultar_rnmc(cedula, fecha_expedicion):
 
     driver.find_element(By.ID, "formulario:tipoID_label").click()
     driver.find_element(By.XPATH, "//li[contains(text(),'Cédula de Ciudadanía')]").click()
-
     driver.find_element(By.ID, "formulario:documento").send_keys(cedula)
     driver.find_element(By.ID, "formulario:fechaExpedicion_input").send_keys(fecha_expedicion)
     driver.find_element(By.ID, "formulario:consultar").click()
-
     wait.until(EC.presence_of_element_located((By.ID, "formulario:j_idt37")))
+    time.sleep(1)
 
-    time.sleep(1)  # Asegura carga de resultado
     html = driver.page_source
     driver.quit()
     return html
 
 def guardar_html_y_pdf(html, cedula):
     nombre_base = f"rnmc_{cedula}"
-    html_file = f"{nombre_base}.html"
-    pdf_file = f"{nombre_base}.pdf"
+    archivo_html = f"{nombre_base}.html"
+    archivo_pdf = f"{nombre_base}.pdf"
+    archivo_txt = f"rnmc_log_{cedula}.txt"
 
-    with open(html_file, "w", encoding="utf-8") as f:
+    with open(archivo_html, "w", encoding="utf-8") as f:
         f.write(html)
 
-    print(f"HTML guardado: {html_file}")
+    with open(archivo_txt, "w", encoding="utf-8") as f:
+        f.write(html)
 
     try:
-        pdfkit.from_file(html_file, pdf_file)
-        print(f"PDF generado: {pdf_file}")
+        pdfkit.from_file(archivo_html, archivo_pdf)
     except Exception as e:
-        print("Error al generar PDF:", e)
+        print(f"[ERROR] al generar PDF: {e}")
+        archivo_pdf = None
 
-    return html_file, pdf_file
-
-def subir_a_drive(archivo, carpeta_id, drive):
-    archivo_drive = drive.CreateFile({
-        'title': os.path.basename(archivo),
-        'parents': [{'id': carpeta_id}]
-    })
-    archivo_drive.SetContentFile(archivo)
-    archivo_drive.Upload()
-    print(f"Archivo subido a Drive: {archivo}")
+    return archivo_html, archivo_pdf, archivo_txt
 
 def autenticar_drive():
     gauth = GoogleAuth()
     gauth.LoadCredentialsFile("teservimos-ocr-1c78273f15f3.json")
-    drive = GoogleDrive(gauth)
-    return drive
+    return GoogleDrive(gauth)
 
-def guardar_log(html, cedula):
-    with open(f"rnmc_log_{cedula}.txt", "w", encoding="utf-8") as f:
-        f.write(html)
-    print("Log guardado como archivo de texto.")
+def subir_a_drive(archivo_local, carpeta_id, drive):
+    archivo = drive.CreateFile({
+        'title': os.path.basename(archivo_local),
+        'parents': [{'id': carpeta_id}]
+    })
+    archivo.SetContentFile(archivo_local)
+    archivo.Upload()
+    archivo['shared'] = True
+    archivo.UploadParam({'role': 'reader', 'type': 'anyone'})
+    return archivo['id'], archivo['alternateLink']
 
 if __name__ == "__main__":
     try:
@@ -88,19 +81,25 @@ if __name__ == "__main__":
         fecha_exp = sys.argv[2]
         carpeta_destino_id = sys.argv[3]
 
-        print(f"== Consultando RNMC para {cedula} con fecha {fecha_exp}")
+        print(">>> INICIO DE CONSULTA RNMC <<<")
         html = consultar_rnmc(cedula, fecha_exp)
-
-        guardar_log(html, cedula)
-
-        html_file, pdf_file = guardar_html_y_pdf(html, cedula)
+        archivo_html, archivo_pdf, archivo_txt = guardar_html_y_pdf(html, cedula)
 
         drive = autenticar_drive()
-        subir_a_drive(pdf_file, carpeta_destino_id, drive)
-        subir_a_drive(html_file, carpeta_destino_id, drive)
+        link_publico = None
+        if archivo_pdf:
+            id_archivo, link_publico = subir_a_drive(archivo_pdf, carpeta_destino_id, drive)
 
-        print("== Proceso completado exitosamente ==")
+        resultado = {
+            "nombre_pdf": archivo_pdf,
+            "link_drive_pdf": link_publico,
+            "nombre_html": archivo_html,
+            "nombre_txt": archivo_txt
+        }
+
+        print("== Resultado Final ==")
+        print(json.dumps(resultado))
 
     except Exception as e:
-        print("ERROR en el proceso:")
+        print("[ERROR] Excepción en el proceso:")
         traceback.print_exc()

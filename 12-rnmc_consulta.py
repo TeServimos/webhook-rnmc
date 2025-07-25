@@ -1,105 +1,81 @@
 import sys
 import time
-import os
-import json
 import traceback
+import pdfkit
+from googleapiclient.discovery import build
+from google.oauth2 import service_account
+from googleapiclient.http import MediaFileUpload
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support.ui import WebDriverWait, Select
 from selenium.webdriver.support import expected_conditions as EC
-from pydrive.auth import GoogleAuth
-from pydrive.drive import GoogleDrive
-import pdfkit
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
 
-def iniciar_driver():
-    chrome_options = Options()
-    chrome_options.add_argument('--headless')
-    chrome_options.add_argument('--no-sandbox')
-    chrome_options.add_argument('--disable-dev-shm-usage')
-    return webdriver.Chrome(options=chrome_options)
+# === Validar argumentos de entrada ===
+if len(sys.argv) != 4:
+    print("Uso: script.py <cedula> <fecha_exp> <folder_id>")
+    sys.exit(1)
 
-def consultar_rnmc(cedula, fecha_expedicion):
-    url = "https://antecedentes.policia.gov.co:7005/WebJudicial/index.xhtml"
-    driver = iniciar_driver()
-    driver.get(url)
+CEDULA = sys.argv[1]
+FECHA_EXP = sys.argv[2]
+FOLDER_ID = sys.argv[3]
 
-    wait = WebDriverWait(driver, 15)
-    wait.until(EC.presence_of_element_located((By.ID, "formulario:documento")))
+ARCHIVO_PDF = f"resultado_rnmc_{CEDULA}.pdf"
+ARCHIVO_HTML = f"resultado_rnmc_{CEDULA}.html"
 
-    driver.find_element(By.ID, "formulario:tipoID_label").click()
-    driver.find_element(By.XPATH, "//li[contains(text(),'Cédula de Ciudadanía')]").click()
-    driver.find_element(By.ID, "formulario:documento").send_keys(cedula)
-    driver.find_element(By.ID, "formulario:fechaExpedicion_input").send_keys(fecha_expedicion)
-    driver.find_element(By.ID, "formulario:consultar").click()
-    wait.until(EC.presence_of_element_located((By.ID, "formulario:j_idt37")))
-    time.sleep(1)
+try:
+    print(">>> INICIO DE CONSULTA RNMC <<<")
 
-    html = driver.page_source
-    driver.quit()
-    return html
+    # === Configurar navegador ===
+    opts = Options()
+    opts.add_argument("--headless")  # importante en Render
+    opts.add_argument("--no-sandbox")
+    opts.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=opts)
+    wait = WebDriverWait(driver, 20)
+    acts = ActionChains(driver)
 
-def guardar_html_y_pdf(html, cedula):
-    nombre_base = f"rnmc_{cedula}"
-    archivo_html = f"{nombre_base}.html"
-    archivo_pdf = f"{nombre_base}.pdf"
-    archivo_txt = f"rnmc_log_{cedula}.txt"
+    # === Ingresar a la página de la Policía ===
+    driver.get("https://srvcnpc.policia.gov.co/PSC/frm_cnp_consulta.aspx")
+    print("Página cargada.")
 
-    with open(archivo_html, "w", encoding="utf-8") as f:
-        f.write(html)
+    # === Llenar el formulario ===
+    Select(wait.until(EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_ddlTipoDoc")))).select_by_value("55")
 
-    with open(archivo_txt, "w", encoding="utf-8") as f:
-        f.write(html)
+    campo_cedula = wait.until(EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_txtExpediente")))
+    campo_cedula.clear()
+    acts.move_to_element(campo_cedula).click().pause(0.2).send_keys(CEDULA).send_keys(Keys.TAB).perform()
 
-    try:
-        pdfkit.from_file(archivo_html, archivo_pdf)
-    except Exception as e:
-        print(f"[ERROR] al generar PDF: {e}")
-        archivo_pdf = None
+    campo_fecha = wait.until(EC.element_to_be_clickable((By.ID, "txtFechaexp")))
+    campo_fecha.clear()
+    acts.move_to_element(campo_fecha).click().pause(0.2).send_keys(FECHA_EXP).send_keys(Keys.TAB).perform()
 
-    return archivo_html, archivo_pdf, archivo_txt
+    wait.until(EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_btnConsultar2"))).click()
 
-def autenticar_drive():
-    gauth = GoogleAuth()
-    gauth.LoadCredentialsFile("teservimos-ocr-1c78273f15f3.json")
-    return GoogleDrive(gauth)
+    print("Formulario enviado. Esperando resultados...")
+    time.sleep(6)
 
-def subir_a_drive(archivo_local, carpeta_id, drive):
-    archivo = drive.CreateFile({
-        'title': os.path.basename(archivo_local),
-        'parents': [{'id': carpeta_id}]
+    # === Guardar HTML ===
+    html_content = driver.page_source
+    html_content = html_content.replace("<head>", "<head><meta charset='UTF-8'>")
+    with open(ARCHIVO_HTML, "w", encoding="utf-8") as f:
+        f.write(html_content)
+
+    # === Convertir a PDF ===
+    print("Generando PDF...")
+    pdfkit.from_file(ARCHIVO_HTML, ARCHIVO_PDF, options={
+        'enable-local-file-access': '',
+        'load-error-handling': 'ignore',
+        'load-media-error-handling': 'ignore',
+        'encoding': 'utf-8'
     })
-    archivo.SetContentFile(archivo_local)
-    archivo.Upload()
-    archivo['shared'] = True
-    archivo.UploadParam({'role': 'reader', 'type': 'anyone'})
-    return archivo['id'], archivo['alternateLink']
 
-if __name__ == "__main__":
-    try:
-        cedula = sys.argv[1]
-        fecha_exp = sys.argv[2]
-        carpeta_destino_id = sys.argv[3]
+    print("PDF generado con éxito.")
 
-        print(">>> INICIO DE CONSULTA RNMC <<<")
-        html = consultar_rnmc(cedula, fecha_exp)
-        archivo_html, archivo_pdf, archivo_txt = guardar_html_y_pdf(html, cedula)
-
-        drive = autenticar_drive()
-        link_publico = None
-        if archivo_pdf:
-            id_archivo, link_publico = subir_a_drive(archivo_pdf, carpeta_destino_id, drive)
-
-        resultado = {
-            "nombre_pdf": archivo_pdf,
-            "link_drive_pdf": link_publico,
-            "nombre_html": archivo_html,
-            "nombre_txt": archivo_txt
-        }
-
-        print("== Resultado Final ==")
-        print(json.dumps(resultado))
-
-    except Exception as e:
-        print("[ERROR] Excepción en el proceso:")
-        traceback.print_exc()
+    # === Subir a Google Drive ===
+    print("Subiendo a Google Drive...")
+    SCOPES = ['https://www.googleapis.com/auth/drive']
+    SERVICE_ACCOUNT_FILE = 'teservimos-ocr-1c78273f15f3.json'
+    creds = service_account.Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE
